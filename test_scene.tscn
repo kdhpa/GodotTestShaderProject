@@ -1,0 +1,37 @@
+[gd_scene load_steps=6 format=3 uid="uid://cix3eh63h7sg3"]
+
+[ext_resource type="Shader" uid="uid://78seys66ajfs" path="res://flag.gdshader" id="1_sasra"]
+[ext_resource type="Texture2D" uid="uid://bf0mdsnqhag87" path="res://icon.svg" id="1_uhqqe"]
+[ext_resource type="Shader" uid="uid://du0l4fqmt0ccu" path="res://text_glow.gdshader" id="3_sasra"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_sasra"]
+shader = ExtResource("1_sasra")
+shader_parameter/amplitude = 0.05
+shader_parameter/frequency = 10.0
+shader_parameter/speed = 3.0
+shader_parameter/anchor_direction = 1.0
+shader_parameter/use_anchor = 1.0
+shader_parameter/is_y_direction = 0.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ia1lp"]
+shader = ExtResource("3_sasra")
+
+[node name="TestScene" type="Node2D"]
+
+[node name="Icon2" type="Sprite2D" parent="."]
+material = SubResource("ShaderMaterial_sasra")
+position = Vector2(715, 294)
+texture = ExtResource("1_uhqqe")
+
+[node name="Icon" type="Sprite2D" parent="."]
+material = SubResource("ShaderMaterial_sasra")
+position = Vector2(487, 300)
+texture = ExtResource("1_uhqqe")
+
+[node name="RichTextLabel" type="RichTextLabel" parent="."]
+material = SubResource("ShaderMaterial_ia1lp")
+offset_left = 222.0
+offset_top = 278.0
+offset_right = 402.0
+offset_bottom = 318.0
+text = "dafsaf"
