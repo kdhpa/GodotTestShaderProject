@@ -1,265 +1,156 @@
 @tool
 extends EditorPlugin
 
+const BatchConverter = preload("res://addons/shader_converter/shader_batch_converter.gd")
+const SETTINGS_KEY := "epic7_shader_converter/output_path"
+const DEFAULT_OUTPUT_PATH := "res://converted_epic7_shaders"
+
 var convert_button: Button
 var settings_button: Button
 var toolbar_container: HBoxContainer
 var settings_dialog: ConfirmationDialog
-var output_path: String = ""
+var path_input: LineEdit
+var output_path := DEFAULT_OUTPUT_PATH
 
 
 func _enter_tree() -> void:
-	# Load output path from EditorSettings
 	_load_output_path()
 
-	# Create toolbar container for buttons
 	toolbar_container = HBoxContainer.new()
 	toolbar_container.add_theme_constant_override("separation", 4)
 
-	# Create convert button
 	convert_button = Button.new()
-	convert_button.text = "Convert All Shaders"
-	convert_button.tooltip_text = "Convert all .gdshader files in res:// to .frag format"
+	convert_button.text = "Convert for Epic7"
+	convert_button.tooltip_text = "Recursively convert Godot canvas_item shaders to Epic7 Cocos2d-x .frag files"
 	convert_button.pressed.connect(_on_convert_button_pressed)
 	toolbar_container.add_child(convert_button)
 
-	# Create settings button
 	settings_button = Button.new()
-	settings_button.text = "⚙"
-	settings_button.tooltip_text = "Configure output directory"
+	settings_button.text = "Output..."
+	settings_button.tooltip_text = "Configure the conversion output directory"
 	settings_button.pressed.connect(_on_settings_button_pressed)
 	toolbar_container.add_child(settings_button)
 
-	# Add container to toolbar
 	add_control_to_container(CONTAINER_TOOLBAR, toolbar_container)
-
-	# Create and setup settings dialog
 	_setup_settings_dialog()
 
 
 func _exit_tree() -> void:
-	# Remove toolbar buttons
 	if toolbar_container:
 		remove_control_from_container(CONTAINER_TOOLBAR, toolbar_container)
 		toolbar_container.queue_free()
-
-	# Free settings dialog
 	if settings_dialog:
 		settings_dialog.queue_free()
 
 
 func _load_output_path() -> void:
-	var editor_settings = EditorInterface.get_editor_settings()
-
-	if editor_settings.has_setting("shader_converter/output_path"):
-		output_path = editor_settings.get_setting("shader_converter/output_path")
+	var editor_settings := EditorInterface.get_editor_settings()
+	if editor_settings.has_setting(SETTINGS_KEY):
+		output_path = str(editor_settings.get_setting(SETTINGS_KEY))
 	else:
-		# Default path: Desktop/shader_folder
-		output_path = OS.get_system_dir(OS.SYSTEM_DIR_DESKTOP) + "/shader_folder"
+		output_path = DEFAULT_OUTPUT_PATH
 
 
 func _setup_settings_dialog() -> void:
-	# Create settings dialog dynamically
 	settings_dialog = ConfirmationDialog.new()
-	settings_dialog.title = "Shader Converter Settings"
-	settings_dialog.size = Vector2i(500, 150)
+	settings_dialog.title = "Epic7 Shader Converter"
+	settings_dialog.size = Vector2i(560, 180)
 
-	# Create main container
-	var main_container = VBoxContainer.new()
+	var main_container := VBoxContainer.new()
 	main_container.add_theme_constant_override("separation", 8)
 
-	# Create label
-	var label = Label.new()
-	label.text = "Output Directory for .frag files:"
+	var label := Label.new()
+	label.text = "Output directory (.frag, .uniforms.lua, shader_manifest.json):"
 	main_container.add_child(label)
 
-	# Create path input with browse button
-	var path_container = HBoxContainer.new()
+	var path_container := HBoxContainer.new()
 	path_container.add_theme_constant_override("separation", 8)
 
-	var path_input = LineEdit.new()
-	path_input.custom_minimum_size = Vector2(300, 0)
-	path_input.editable = false
+	path_input = LineEdit.new()
+	path_input.custom_minimum_size = Vector2(390, 0)
 	path_input.text = output_path
-	path_input.name = "PathInput"
+	path_input.placeholder_text = DEFAULT_OUTPUT_PATH
 	path_container.add_child(path_input)
 
-	var browse_button = Button.new()
+	var browse_button := Button.new()
 	browse_button.text = "Browse..."
-	browse_button.pressed.connect(func(): _on_browse_pressed(settings_dialog))
+	browse_button.pressed.connect(_on_browse_pressed)
 	path_container.add_child(browse_button)
-
 	main_container.add_child(path_container)
 
-	# Add to dialog
+	var hint := Label.new()
+	hint.text = "Use res:// for project-local output. Folder structure is preserved to avoid name collisions."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	main_container.add_child(hint)
+
 	settings_dialog.add_child(main_container)
-
-	# Connect signals
-	settings_dialog.confirmed.connect(func(): _on_settings_confirmed(settings_dialog))
-
-	# Add to scene
+	settings_dialog.confirmed.connect(_on_settings_confirmed)
 	add_child(settings_dialog)
 
 
 func _on_convert_button_pressed() -> void:
-	# Validate output path
+	output_path = output_path.strip_edges().trim_suffix("/").trim_suffix("\\")
 	if output_path.is_empty():
-		_show_error("Output path not configured. Please click the settings button (⚙) first.")
+		_show_error("Output path is empty. Choose Output... and enter a directory.")
 		return
 
-	# Ensure output directory exists
-	if not _ensure_output_directory(output_path):
-		_show_error("Failed to create output directory: %s\n\nCheck permissions and valid path." % output_path)
-		return
+	convert_button.disabled = true
+	var batch_result := BatchConverter.convert_project(output_path)
+	convert_button.disabled = false
 
-	# Scan for shaders
-	var shader_files = _scan_gdshader_files()
-	if shader_files.is_empty():
-		_show_error("No .gdshader files found in res://")
-		return
-
-	# Convert each file
-	var success_count = 0
-	var fail_count = 0
-
-	for shader_path in shader_files:
-		if _convert_file(shader_path, output_path):
-			success_count += 1
-		else:
-			fail_count += 1
-
-	# Show results
-	_show_success("Conversion complete!\n\nSuccess: %d\nFailed: %d" % [success_count, fail_count])
-
-	# Refresh filesystem
 	EditorInterface.get_resource_filesystem().scan()
+	var summary := "Epic7 conversion complete.\n\nConverted: %d\nFailed: %d\nWarnings: %d\nOutput: %s" % [batch_result.converted_count, batch_result.failed_count, batch_result.warning_count, output_path]
+	if not batch_result.failures.is_empty():
+		summary += "\n\nFailures:\n" + "\n\n".join(batch_result.failures.slice(0, 8))
+		_show_error(summary)
+	else:
+		_show_result(summary)
 
 
 func _on_settings_button_pressed() -> void:
-	if settings_dialog:
-		# Update path input to current value
-		var path_input = settings_dialog.find_child("PathInput", true, false)
-		if path_input:
-			path_input.text = output_path
-		settings_dialog.popup_centered()
+	path_input.text = output_path
+	settings_dialog.popup_centered(Vector2i(560, 180))
 
 
-func _on_browse_pressed(dialog: ConfirmationDialog) -> void:
-	var dir_dialog = EditorFileDialog.new()
-	dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
-	dir_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
-	dir_dialog.title = "Select Output Directory"
-
-	# Set initial directory
-	if not output_path.is_empty() and DirAccess.open(output_path) != null:
-		dir_dialog.current_path = output_path
-	else:
-		dir_dialog.current_path = OS.get_system_dir(OS.SYSTEM_DIR_DESKTOP)
-
-	var path_input = dialog.find_child("PathInput", true, false)
-	if path_input:
-		dir_dialog.dir_selected.connect(func(path: String): path_input.text = path)
-
-	add_child(dir_dialog)
-	dir_dialog.popup_centered_ratio(0.5)
+func _on_browse_pressed() -> void:
+	var directory_dialog := EditorFileDialog.new()
+	directory_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+	directory_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+	directory_dialog.title = "Select Epic7 shader output directory"
+	var initial_path := ProjectSettings.globalize_path(output_path) if output_path.begins_with("res://") else output_path
+	if DirAccess.open(initial_path) != null:
+		directory_dialog.current_path = initial_path
+	directory_dialog.dir_selected.connect(func(path: String) -> void:
+		path_input.text = path
+		directory_dialog.queue_free()
+	)
+	directory_dialog.canceled.connect(directory_dialog.queue_free)
+	add_child(directory_dialog)
+	directory_dialog.popup_centered_ratio(0.55)
 
 
-func _on_settings_confirmed(dialog: ConfirmationDialog) -> void:
-	var path_input = dialog.find_child("PathInput", true, false)
-	if not path_input:
-		return
-
-	var selected_path = path_input.text
-
-	# Validate path
+func _on_settings_confirmed() -> void:
+	var selected_path := path_input.text.strip_edges().trim_suffix("/").trim_suffix("\\")
 	if selected_path.is_empty():
-		_show_error("Please select a valid directory")
+		_show_error("Please enter a valid output directory.")
 		return
-
-	# Save to EditorSettings
-	var editor_settings = EditorInterface.get_editor_settings()
-	editor_settings.set_setting("shader_converter/output_path", selected_path)
-
-	# Update current path
 	output_path = selected_path
-
-
-func _scan_gdshader_files() -> Array[String]:
-	var files: Array[String] = []
-	var dir = DirAccess.open("res://")
-
-	if dir == null:
-		return files
-
-	dir.list_dir_begin()
-	var file_name = dir.get_next()
-
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".gdshader"):
-			files.append("res://" + file_name)
-		file_name = dir.get_next()
-
-	dir.list_dir_end()
-	return files
-
-
-func _convert_file(shader_path: String, output_dir: String) -> bool:
-	# Read shader file
-	var file = FileAccess.open(shader_path, FileAccess.READ)
-	if file == null:
-		return false
-
-	var shader_content = file.get_as_text()
-	file.close()
-
-	# Validate content
-	if shader_content.is_empty():
-		return false
-
-	# Convert shader
-	var converted_content = ShaderParser.convert_to_frag(shader_content)
-
-	# Determine output filename
-	var filename = shader_path.get_file().trim_suffix(".gdshader") + ".frag"
-	var output_path_full = output_dir.path_join(filename)
-
-	# Write converted content
-	var output_file = FileAccess.open(output_path_full, FileAccess.WRITE)
-	if output_file == null:
-		return false
-
-	output_file.store_string(converted_content)
-	output_file.close()
-
-	return true
-
-
-func _ensure_output_directory(path: String) -> bool:
-	var dir = DirAccess.open(path.get_base_dir())
-	if dir == null:
-		return false
-
-	if DirAccess.open(path) == null:
-		var error = dir.make_dir(path)
-		if error != OK:
-			return false
-
-	return true
+	EditorInterface.get_editor_settings().set_setting(SETTINGS_KEY, output_path)
 
 
 func _show_error(message: String) -> void:
-	var dialog = AcceptDialog.new()
-	dialog.dialog_text = message
-	dialog.title = "Conversion Error"
-	get_tree().root.add_child(dialog)
-	dialog.popup_centered(Vector2i(400, 150))
-	dialog.confirmed.connect(dialog.queue_free)
+	_show_dialog("Epic7 Conversion Error", message)
 
 
-func _show_success(message: String) -> void:
-	var dialog = AcceptDialog.new()
+func _show_result(message: String) -> void:
+	_show_dialog("Epic7 Conversion Complete", message)
+
+
+func _show_dialog(title: String, message: String) -> void:
+	var dialog := AcceptDialog.new()
+	dialog.title = title
 	dialog.dialog_text = message
-	dialog.title = "Conversion Successful"
+	dialog.min_size = Vector2i(520, 220)
 	get_tree().root.add_child(dialog)
-	dialog.popup_centered(Vector2i(400, 150))
 	dialog.confirmed.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(600, 340))
